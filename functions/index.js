@@ -67,14 +67,27 @@ exports.scheduledWeatherBot = onSchedule({
     for (const doc of usersSnapshot.docs) {
       const { userId, lat, lng, locationName } = doc.data();
 
-      // 天気データの取得
-      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`;
+      // 天気データの取得（降水確率・週間予報も含む）
+      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo&forecast_days=7`;
       const response = await axios.get(weatherUrl);
+      const daily = response.data.daily;
 
-      const todayMaxTemp = response.data.daily.temperature_2m_max[0];
-      const todayMinTemp = response.data.daily.temperature_2m_min[0];
-      const todayWeatherCode = response.data.daily.weather_code[0];
+      const todayMaxTemp = daily.temperature_2m_max[0];
+      const todayMinTemp = daily.temperature_2m_min[0];
+      const todayWeatherCode = daily.weather_code[0];
+      const todayPrecip = daily.precipitation_probability_max[0];
       const weatherText = weatherCodeMap[todayWeatherCode] || '不明な天気';
+      const pp = (v) => (v == null ? '--' : v); // 降水確率が無い日の安全表示
+
+      // 週間予報（明日以降）を組み立て
+      const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+      let weeklyText = '';
+      for (let i = 1; i < daily.time.length; i++) {
+        const [y, m, d] = daily.time[i].split('-').map(Number);
+        const wd = weekdays[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+        const wt = weatherCodeMap[daily.weather_code[i]] || '不明';
+        weeklyText += `${m}/${d}(${wd}) ${wt} ${daily.temperature_2m_max[i]}℃/${daily.temperature_2m_min[i]}℃ ☔${pp(daily.precipitation_probability_max[i])}%\n`;
+      }
 
       // 💡変更: 固定のif文を消して、Gemini API に指示（プロンプト）を出す
       let aiAdvice = "";
@@ -88,7 +101,8 @@ exports.scheduledWeatherBot = onSchedule({
         天気: ${weatherText}
         最高気温: ${todayMaxTemp}度
         最低気温: ${todayMinTemp}度
-        条件: ニュースのアナウンサーのような柔らかいトーンで出力してください。`;
+        降水確率: ${pp(todayPrecip)}%
+        条件: ニュースのアナウンサーのような柔らかいトーンで出力してください。降水確率が高い場合は傘の用意をやさしく促してください。`;
 
         // AIにテキストを生成させる（ここで少し待ちます）
         const result = await model.generateContent(prompt);
@@ -100,7 +114,7 @@ exports.scheduledWeatherBot = onSchedule({
       }
 
       // 最終的なメッセージの組み立て
-      const messageText = `【${locationName}の今日の天気】\n天気: ${weatherText}\n最高気温: ${todayMaxTemp}℃\n最低気温: ${todayMinTemp}℃\n\n🤖 天気予報botからのひと言:\n${aiAdvice}`;
+      const messageText = `【${locationName}の今日の天気】\n天気: ${weatherText}\n最高気温: ${todayMaxTemp}℃\n最低気温: ${todayMinTemp}℃\n降水確率: ${pp(todayPrecip)}%\n\n📅 週間予報\n${weeklyText.trim()}\n\n🤖 天気予報botからのひと言:\n${aiAdvice}`;
 
       await axios.post(lineApiUrl, {
         to: userId,

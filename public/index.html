@@ -19,6 +19,9 @@
     .search-row button { width: auto; margin-top: 0; padding: 0 18px; background-color: #555; font-size: 14px; white-space: nowrap; }
     .selected { margin-top: 10px; font-size: 14px; color: #06803a; font-weight: bold; min-height: 18px; }
     .hint { margin-top: 4px; font-size: 12px; color: #999; }
+    .or-divider { margin-top: 14px; text-align: center; font-size: 12px; color: #999; }
+    .gps-btn { margin-top: 8px; background-color: #fff; color: #06C755; border: 1px solid #06C755; }
+    .gps-btn:disabled { background-color: #fff; color: #aaa; border-color: #ccc; }
   </style>
 </head>
 <body>
@@ -33,6 +36,10 @@
     </div>
     <div class="hint">地名を入力して「検索」を押し、候補から選んでください。</div>
     <select id="locationResults" style="display:none;"></select>
+
+    <div class="or-divider">または</div>
+    <button type="button" id="gpsBtn" class="gps-btn">📍 現在地から設定する</button>
+
     <div id="selectedLocation" class="selected"></div>
 
     <label for="time">⏰ 通知時間</label>
@@ -123,6 +130,49 @@
       selectedLocation = JSON.parse(locationResults.value);
       selectedDiv.style.color = "#06803a";
       selectedDiv.innerText = "✅ 選択中: " + selectedLocation.name;
+    });
+
+    // 📍 現在地（GPS）から設定（逆ジオコーディングで地名も自動取得）
+    const gpsBtn = document.getElementById("gpsBtn");
+    gpsBtn.addEventListener("click", () => {
+      if (!navigator.geolocation) {
+        selectedDiv.style.color = "red";
+        selectedDiv.innerText = "この端末では現在地を取得できません。";
+        return;
+      }
+      gpsBtn.disabled = true;
+      gpsBtn.innerText = "現在地を取得中...";
+
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        try {
+          const res = await axios.get("https://api.bigdatacloud.net/data/reverse-geocode-client", {
+            params: { latitude, longitude, localityLanguage: "ja" }
+          });
+          const sub = res.data.principalSubdivision || "";
+          const loc = res.data.locality || res.data.city || "現在地";
+          const name = (sub ? sub + " " : "") + loc;
+          selectedLocation = { name, lat: latitude, lng: longitude };
+          selectedDiv.style.color = "#06803a";
+          selectedDiv.innerText = "✅ 選択中: " + name + "（現在地）";
+        } catch (err) {
+          console.error("逆ジオコーディングエラー:", err);
+          // 地名が取れなくても座標だけで設定できるようにする
+          selectedLocation = { name: "現在地", lat: latitude, lng: longitude };
+          selectedDiv.style.color = "#06803a";
+          selectedDiv.innerText = "✅ 選択中: 現在地";
+        } finally {
+          locationResults.style.display = "none";
+          gpsBtn.disabled = false;
+          gpsBtn.innerText = "📍 現在地から設定する";
+        }
+      }, (err) => {
+        console.error("位置情報エラー:", err);
+        selectedDiv.style.color = "red";
+        selectedDiv.innerText = "現在地を取得できませんでした。位置情報の許可を確認してください。";
+        gpsBtn.disabled = false;
+        gpsBtn.innerText = "📍 現在地から設定する";
+      }, { enableHighAccuracy: false, timeout: 10000 });
     });
 
     let currentUserId = "";
