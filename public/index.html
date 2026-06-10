@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>天気Bot 設定画面</title>
+  <style>
+    body { font-family: sans-serif; background-color: #f5f5f5; padding: 20px; }
+    .container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 400px; margin: 0 auto; }
+    h1 { font-size: 20px; text-align: center; color: #333; }
+    label { display: block; margin-top: 15px; font-weight: bold; color: #555; }
+    select { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 16px; }
+    button { width: 100%; padding: 15px; margin-top: 25px; background-color: #06C755; color: white; border: none; border-radius: 5px; font-size: 16px; font-weight: bold; cursor: pointer; }
+    button:disabled { background-color: #aaa; }
+    #status { margin-top: 15px; text-align: center; font-size: 14px; color: red; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>通知設定</h1>
+    
+    <label for="location">📍 場所</label>
+    <select id="location">
+      <option value='{"name":"佐賀県鳥栖市","lat":33.3785,"lng":130.5186}'>佐賀県 鳥栖市</option>
+      <option value='{"name":"佐賀県唐津市","lat":33.449,"lng":129.969}'>佐賀県 唐津市</option>
+      <option value='{"name":"東京都新宿区","lat":35.6895,"lng":139.6917}'>東京都 新宿区</option>
+      <option value='{"name":"大阪府大阪市","lat":34.6937,"lng":135.5023}'>大阪府 大阪市</option>
+      <option value='{"name":"福岡県福岡市","lat":33.5902,"lng":130.4017}'>福岡県 福岡市</option>
+    </select>
+
+    <label for="time">⏰ 通知時間</label>
+    <select id="time" required>
+      </select>
+
+    <button id="saveBtn">設定を保存する</button>
+    <div id="status"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+  <script>
+    // ⚠️ 前と同じように、あなたのAPI URLとLIFF IDを貼り付けてください！
+    const API_URL = "https://us-central1-weatherbot-project-bc202.cloudfunctions.net/saveSettings"; 
+    const LIFF_ID = "2009523929-TSCmekrj"; 
+    
+    // 💡変更3: 画面が開いたときに、1時間ごとの時間の選択肢（00:00〜23:00）を作る
+    const timeSelect = document.getElementById("time");
+    for (let i = 0; i < 24; i++) {
+      const hour = String(i).padStart(2, '0'); // 例: "7" を "07" にする
+      const option = document.createElement("option");
+      option.value = `${hour}:00`;
+      option.text = `${hour}:00`;
+      if (i === 7) option.selected = true; // デフォルトを朝7時にしておく
+      timeSelect.appendChild(option);
+    }
+
+    let currentUserId = "";
+
+    async function initializeLiff() {
+      try {
+        await liff.init({ liffId: LIFF_ID });
+        if (liff.isLoggedIn()) {
+          const profile = await liff.getProfile();
+          currentUserId = profile.userId;
+        } else {
+          currentUserId = "dummy_user_id";
+        }
+      } catch (err) {
+        console.error("LIFF初期化エラー", err);
+        currentUserId = "dummy_user_id";
+      }
+    }
+
+    initializeLiff();
+
+    document.getElementById("saveBtn").addEventListener("click", async () => {
+      const locationData = JSON.parse(document.getElementById("location").value);
+      const timeData = document.getElementById("time").value;
+      const statusDiv = document.getElementById("status");
+      const btn = document.getElementById("saveBtn");
+
+      if (!timeData) {
+        statusDiv.innerText = "時間を入力してください。";
+        return;
+      }
+
+      const payload = {
+        userId: currentUserId,
+        time: timeData,
+        lat: locationData.lat,
+        lng: locationData.lng,
+        locationName: locationData.name
+      };
+
+      try {
+        btn.innerText = "保存中...";
+        btn.disabled = true;
+        statusDiv.innerText = "";
+
+        await axios.post(API_URL, payload);
+
+        btn.innerText = "保存完了！";
+        statusDiv.style.color = "green";
+        statusDiv.innerText = "設定が保存されました。画面を閉じてください。";
+        
+        if (liff.isInClient()) {
+          setTimeout(() => liff.closeWindow(), 1500);
+        }
+      } catch (error) {
+        console.error("保存エラー:", error);
+        btn.innerText = "設定を保存する";
+        btn.disabled = false;
+        statusDiv.style.color = "red";
+        statusDiv.innerText = "保存に失敗しました。";
+      }
+    });
+  </script>
+</body>
+</html>
