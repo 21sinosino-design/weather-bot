@@ -24,6 +24,25 @@ const weatherCodeMap = {
   71: '小雪', 73: '雪', 75: '大雪', 80: 'にわか雨', 95: '雷雨'
 };
 
+// Geminiが一時的に混雑(503)やレート超過(429)を返したときに、少し待って再試行する
+// 朝などアクセスが集中する時間帯は503が出やすく、1回だけで諦めると予備メッセージになってしまうため
+async function generateWithRetry(model, prompt, maxRetries = 3) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await model.generateContent(prompt);
+      return result.response.text();
+    } catch (err) {
+      const msg = String(err && err.message || '');
+      const retriable = err && (err.status === 503 || err.status === 429)
+        || msg.includes('503') || msg.includes('429') || msg.includes('overload');
+      if (!retriable || attempt >= maxRetries) throw err;
+      const waitMs = 3000 * (attempt + 1); // 3秒 → 6秒 → 9秒 と待ち時間を伸ばす
+      console.warn(`Gemini が混雑中(${err.status})。${waitMs}ms後に再試行します (${attempt + 1}/${maxRetries})`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+}
+
 // ===================================================================
 // ① 【受取窓口】（前回から変更なし）
 // ===================================================================
@@ -97,13 +116,12 @@ exports.scheduledWeatherBot = onSchedule({
         - 気温に応じた服装のアドバイス（例: 上着が必要、薄着で快適、重ね着がおすすめ など）を必ず一言添えてください。
         - 降水確率が高い場合は傘の用意をやさしく促してください。`;
 
-        // AIにテキストを生成させる（ここで少し待ちます）
-        const result = await model.generateContent(prompt);
-        aiAdvice = result.response.text();
+        // AIにテキストを生成させる（混雑時は数回まで自動で再試行）
+        aiAdvice = await generateWithRetry(model, prompt);
       } catch (aiError) {
         console.error("Gemini APIエラー:", aiError);
-        // 万が一AIがダウンしていた場合の安全網（フォールバック）
-        aiAdvice = "今日も一日がんばりましょう！"; 
+        // 再試行しても駄目だった場合の安全網（フォールバック）
+        aiAdvice = "今日も一日がんばりましょう！";
       }
 
       // 最終的なメッセージの組み立て
